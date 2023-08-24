@@ -1,5 +1,7 @@
-import nltk
+import os
 import ssl
+import nltk
+import importlib
 
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -8,71 +10,74 @@ except AttributeError:
 else:
     ssl._create_default_https_context = _create_unverified_https_context
 
+from llama_index import GPTVectorStoreIndex, SimpleDirectoryReader, ServiceContext, Document, StorageContext, load_index_from_storage
 
-
-from llama_index import GPTVectorStoreIndex, SimpleDirectoryReader, ServiceContext, Document,StorageContext, load_index_from_storage
-
-
-def load_knowledge() -> list[Document]:
-    # Load data from directory
-    documents = SimpleDirectoryReader('knowledge').load_data()
+def load_knowledge(knowledge_dir):
+    documents = SimpleDirectoryReader(knowledge_dir).load_data()
     return documents
 
-
-def create_index() -> GPTVectorStoreIndex:
+def create_index(documents, service_context):
     print('Creating new index')
-    # Load data
-    documents = load_knowledge()
-    # Create index from documents
-    service_context = ServiceContext.from_defaults(chunk_size_limit=3000)
     index = GPTVectorStoreIndex.from_documents(documents, service_context=service_context)
     save_index(index)
     return index
 
+def save_index(index):
+    # Save index to file within the knowledge_dir
+    persist_dir = os.path.join(knowledge_dir, 'index.json')
+    index.storage_context.persist(persist_dir=persist_dir)
 
-def save_index(index: GPTVectorStoreIndex):
-    # Save index to file
-    #index.save_to_disk('knowledge/index.json')
-    index.storage_context.persist(persist_dir="knowledge/index.json")
-
-
-def load_index() -> GPTVectorStoreIndex:
-    # Load index from file
+def load_index():
     try:
-        # rebuild storage context
-        storage_context = StorageContext.from_defaults(persist_dir="knowledge/index.json")
-        # load index
+        # Rebuild storage context
+        storage_context = StorageContext.from_defaults(persist_dir=os.path.join(knowledge_dir, 'index.json'))
+        # Load index
         index = load_index_from_storage(storage_context)
-       # index = GPTVectorStoreIndex.load_index_from_storage('knowledge/index.json')
     except FileNotFoundError:
         index = create_index()
     return index
 
-
-def query_index(index: GPTVectorStoreIndex):
-    # Query index
+def query_index(index):
     query_engine = index.as_query_engine()
     while True:
         prompt = input("Type prompt...")
         response = query_engine.query(prompt)
-        print(response)
+        print(f"\n\n{response}\n\n")
 
+knowledge_dir = ''
 
 def main():
-    # Ask user if they want to refresh the index
-    refresh_index = input("Do you want to refresh the index? (y/n) [n]: ")
+    global knowledge_dir
+    party_names = os.listdir('knowledge')
+    if not party_names:
+        print("No parties available.")
+        return
+
+    print("Available parties:")
+    for i, party_name in enumerate(party_names, start=1):
+        print(f"{i}. {party_name}")
+
+    party_choice = input("Choose a party by entering its number: ")
+    party_choice = int(party_choice) - 1
+
+    if party_choice < 0 or party_choice >= len(party_names):
+        print("Invalid party choice.")
+        return
+
+    party_name = party_names[party_choice]
+    knowledge_dir = f'knowledge/{party_name}'
+    documents = load_knowledge(knowledge_dir)
+    service_context = ServiceContext.from_defaults(chunk_size_limit=3000)
+
+    refresh_index = input(f"Do you want to refresh the {party_name} index? (y/n) [n]: ")
     refresh_index = refresh_index.lower() == 'y'
 
-    # If refreshing the index, create new index and save to file
     if refresh_index:
-        index = create_index()
-    # Otherwise, load index from file
+        index = create_index(documents, service_context)
     else:
         index = load_index()
 
-    # Query index
     query_index(index)
-
 
 if __name__ == '__main__':
     main()
